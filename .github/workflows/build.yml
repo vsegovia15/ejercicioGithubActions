@@ -1,0 +1,123 @@
+name: Empaquetar comprova_desplegaments
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: "3.12"
+  SCRIPT: comprova_desplegaments.py
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+      - name: Configurar Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Instalar PyInstaller
+        run: pip install pyinstaller
+      - name: Generar el ejecutable
+        run: pyinstaller --onefile ${{ env.SCRIPT }}
+      - name: Publicar el ejecutable
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprova-linux
+          path: dist/comprova_desplegaments
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+      - name: Configurar Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Instalar PyInstaller
+        run: pip install pyinstaller
+      - name: Generar el ejecutable
+        run: pyinstaller --onefile ${{ env.SCRIPT }}
+      - name: Publicar el ejecutable
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprova-macos
+          path: dist/comprova_desplegaments
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+      - name: Configurar Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Instalar PyInstaller
+        run: pip install pyinstaller
+      - name: Generar el ejecutable
+        run: pyinstaller --onefile ${{ env.SCRIPT }}
+      - name: Publicar el ejecutable
+        uses: actions/upload-artifact@v4
+        with:
+          name: comprova-windows
+          path: dist/comprova_desplegaments.exe
+
+  test:
+    needs: [build-linux, build-macos, build-windows]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            artefacto: comprova-linux
+            binario: ./comprova_desplegaments
+          - os: macos-latest
+            artefacto: comprova-macos
+            binario: ./comprova_desplegaments
+          - os: windows-latest
+            artefacto: comprova-windows
+            binario: ./comprova_desplegaments.exe
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - name: Descargar el ejecutable
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.artefacto }}
+      - name: Dar permisos de ejecución
+        if: runner.os != 'Windows'
+        run: chmod +x ${{ matrix.binario }}
+      - name: Prueba 1 - ayuda (--help)
+        run: ${{ matrix.binario }} --help
+      - name: Prueba 2 - URLs como parámetros
+        run: ${{ matrix.binario }} example.com httpbin.org/status/500
+      - name: Prueba 3 - URLs desde fichero y salida CSV
+        run: |
+          cat > urls.txt <<'EOF'
+          example.com
+          https://github.com
+          httpbin.org/status/404
+          EOF
+          ${{ matrix.binario }} --fitxer urls.txt --eixida informe.csv
+      - name: Verificar el informe CSV
+        run: |
+          test -f informe.csv || { echo "No se ha generado informe.csv"; exit 1; }
+          head -n 1 informe.csv | grep -q "url,codi,estat,segons,comprovat_el" \
+            || { echo "Cabecera CSV incorrecta"; exit 1; }
+          lineas=$(($(wc -l < informe.csv) - 1))
+          [ "$lineas" -eq 3 ] || { echo "Se esperaban 3 filas y hay $lineas"; exit 1; }
+          echo "Informe correcto ($lineas URLs):"
+          cat informe.csv
+      - name: Guardar el informe
+        uses: actions/upload-artifact@v4
+        with:
+          name: informe-${{ matrix.artefacto }}
+          path: informe.csv
